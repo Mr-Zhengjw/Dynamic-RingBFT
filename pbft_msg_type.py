@@ -1,7 +1,8 @@
 from enum import Enum
 import json
 
-class MsgType(str,Enum):
+
+class MsgType(str, Enum):
     PREPAREMSG = 1
     COMMITMSG = 2
     INVOLVEPREPAREMSG = 3
@@ -9,13 +10,13 @@ class MsgType(str,Enum):
 
 
 class RequestMsg:  # 客户端发给服务器的请求request
-    def __init__(self, timestamp: int, clientID: int, operation, sequenceID: int, ringOrder:list) -> None:
+    def __init__(self, timestamp: int, clientID: int, operation, sequenceID: int, ringOrder: list) -> None:
         self.Timestamp = timestamp
         self.ClientID = clientID
         self.Operation = operation
         self.SequenceID = sequenceID
         self.RingOrder = ringOrder
-        
+
 
 class InvolveRequestMsg:  # 客户端发给服务器的请求request
     def __init__(self, timestamp: int, nodeID: str, myPort: int, scheme) -> None:
@@ -43,7 +44,7 @@ class PrePrepareMsg:
 
 
 class VoteMsg:
-    def __init__(self, viewID: int, sequenceID: int, digest, nodeID,msgType:MsgType,myvote: bool) -> None:
+    def __init__(self, viewID: int, sequenceID: int, digest, nodeID, msgType: MsgType, myvote: bool) -> None:
         self.ViewID = viewID
         self.SequenceID = sequenceID
         self.Digest = digest
@@ -53,76 +54,91 @@ class VoteMsg:
 
 
 class GlobalForwardMsg:
-    def __init__(self, reqMsg:RequestMsg, voteMsg:VoteMsg, digest) -> None:
+    def __init__(self, reqMsg: RequestMsg, voteMsg: VoteMsg, digest) -> None:
         self.ReqMsg = reqMsg
         self.CommitMsg = voteMsg
         self.Digest = digest
 
 
 class LocalForwardMsg:
-    def __init__(self, globalForwardMsg:GlobalForwardMsg) -> None:
+    def __init__(self, globalForwardMsg: GlobalForwardMsg) -> None:
         self.LocalForwardMsg = globalForwardMsg
 
 
-def EncodeRequestMsg(reqMsg:RequestMsg):
+def EncodeRequestMsg(reqMsg: RequestMsg):
     return reqMsg.__dict__
 
 
-def EncodePrePrepareMsg(prePrepareMsg:PrePrepareMsg):
+def EncodePrePrepareMsg(prePrepareMsg: PrePrepareMsg):
     # print(type(prePrepareMsg.RequestMsg),flush=True)
     t = prePrepareMsg.RequestMsg.__dict__
     prePrepareMsg.RequestMsg = t
     return prePrepareMsg.__dict__
 
-def EncodeVoteMsg(msg:VoteMsg):
+
+def EncodeVoteMsg(msg: VoteMsg):
     return msg.__dict__
 
-def EncodeReplyMsg(msg:ReplyMsg):
+
+def EncodeReplyMsg(msg: ReplyMsg):
     return msg.__dict__
 
-def EncodeGlobalForwardMsg(gfMsg:GlobalForwardMsg):
-    tReqMsg = gfMsg.ReqMsg.__dict__
-    tComMsg = gfMsg.CommitMsg.__dict__
-    tGFMsg = gfMsg.__dict__
-    tGFMsg['ReqMsg'] = tReqMsg
-    tGFMsg['CommitMsg'] = tComMsg
-    return tGFMsg
 
-def EncodeLocalForwardMsg(lfMsg:LocalForwardMsg):
+def EncodeGlobalForwardMsg(gfMsg: GlobalForwardMsg):
+    if type(gfMsg.ReqMsg) == RequestMsg:
+        tReqMsg = gfMsg.ReqMsg.__dict__
+        tComMsg = gfMsg.CommitMsg.__dict__
+        tGFMsg = gfMsg.__dict__
+        tGFMsg['ReqMsg'] = tReqMsg
+        tGFMsg['CommitMsg'] = tComMsg
+        return tGFMsg
+    elif type(gfMsg.ReqMsg) == dict:
+        return gfMsg.__dict__
+
+
+def EncodeLocalForwardMsg(lfMsg: LocalForwardMsg):
     t = lfMsg.LocalForwardMsg
     tLFMsg = lfMsg.__dict__
     tLFMsg["LocalForwardMsg"] = EncodeGlobalForwardMsg(t)
     return tLFMsg
 
-def EncodeInvolveRequestMsg(msg:InvolveRequestMsg):
+
+def EncodeInvolveRequestMsg(msg: InvolveRequestMsg):
     return msg.__dict__
 
-def DecodeRequestMsg(msg:dict):
-    return RequestMsg(msg['Timestamp'],msg['ClientID'],msg['Operation'],msg['SequenceID'],list(msg['RingOrder']))
+
+def DecodeRequestMsg(msg: dict):
+    return RequestMsg(msg['Timestamp'], msg['ClientID'], msg['Operation'], msg['SequenceID'], list(msg['RingOrder']))
 
 
-def DecodePrePrepareMsg(msg:dict):
-    reqMsg = RequestMsg(msg['RequestMsg']['Timestamp'],msg['RequestMsg']['ClientID'],msg['RequestMsg']['Operation'],msg['RequestMsg']['SequenceID'],list(msg['RequestMsg']['RingOrder']))
-    return PrePrepareMsg(msg['ViewID'],msg['SequenceID'],msg['Digest'],reqMsg)
+def DecodePrePrepareMsg(msg: dict):
+    reqMsg = RequestMsg(msg['RequestMsg']['Timestamp'], msg['RequestMsg']['ClientID'], msg['RequestMsg']
+                        ['Operation'], msg['RequestMsg']['SequenceID'], list(msg['RequestMsg']['RingOrder']))
+    return PrePrepareMsg(msg['ViewID'], msg['SequenceID'], msg['Digest'], reqMsg)
 
 
-def DecodeVoteMsg(msg:dict):
-    return VoteMsg(msg['ViewID'],msg['SequenceID'],msg['Digest'],msg['NodeID'],msg['MsgType'],msg['Vote'])
+def DecodeVoteMsg(msg: dict):
+    return VoteMsg(msg['ViewID'], msg['SequenceID'], msg['Digest'], msg['NodeID'], msg['MsgType'], msg['Vote'])
 
-def DecodeReplyMsg(msg:dict):
-    return ReplyMsg(msg['ViewID'],msg['Timestamp'],msg['ClientID'],msg['NodeID'],msg['Result'])
 
-def DecodeGlobalForwardMsg(msg:dict):
+def DecodeReplyMsg(msg: dict):
+    return ReplyMsg(msg['ViewID'], msg['Timestamp'], msg['ClientID'], msg['NodeID'], msg['Result'])
+
+
+def DecodeGlobalForwardMsg(msg: dict):
     tReqMsg = DecodeRequestMsg(msg['ReqMsg'])
     tComMsg = DecodeVoteMsg(msg['CommitMsg'])
-    return GlobalForwardMsg(tReqMsg,tComMsg,msg['Digest'])
+    return GlobalForwardMsg(tReqMsg, tComMsg, msg['Digest'])
 
-def DecodeLocalForwardMsg(msg:dict):
+
+def DecodeLocalForwardMsg(msg: dict):
     return LocalForwardMsg(DecodeGlobalForwardMsg(msg["LocalForwardMsg"]))
 
-def DecodeInvolveRequestMsg(msg:dict):
-    return InvolveRequestMsg(msg['Timestamp'],msg['NodeID'],msg['Port'],msg['Scheme'])
+
+def DecodeInvolveRequestMsg(msg: dict):
+    return InvolveRequestMsg(msg['Timestamp'], msg['NodeID'], msg['Port'], msg['Scheme'])
+
 
 if __name__ == "__main__":
     print("RingBFT start...")
-    RequestMsg(1,1,'get name',1,[1,2])
+    RequestMsg(1, 1, 'get name', 1, [1, 2])

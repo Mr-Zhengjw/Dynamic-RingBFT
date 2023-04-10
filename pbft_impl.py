@@ -17,6 +17,7 @@ class stage:
     INVOLVINGPREPREPARED = 6
     INVOLVINGPREPARED = 7
     INVOLVINGCOMMITED = 8
+    INVOLVINGEXECUTED = 9
     
 
 
@@ -182,7 +183,7 @@ class State:
                 return True
         return False
 
-def verifyForward(state: State, globalForwardMsg: GlobalForwardMsg):
+def verifyForward(globalForwardMsg: GlobalForwardMsg):
     digestGot = getDigest(globalForwardMsg.CommitMsg)
     if globalForwardMsg.Digest != digestGot:
         return False

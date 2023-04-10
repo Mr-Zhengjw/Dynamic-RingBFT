@@ -137,7 +137,6 @@ def HisInvolveCommit():
     return "request:{}".format(str(type(msg))+' ', msg)
 
 
-
 if __name__ == '__main__':
     # app.run(host, port, debug, options)
     # ser = StartServer("1",30000)

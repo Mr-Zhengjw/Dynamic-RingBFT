@@ -1,1 +1,1 @@
-python ..\.\test_server.py r1_4 300004
+python ..\.\test_server.py r2_4 30014

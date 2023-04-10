@@ -64,7 +64,7 @@ class Node:
                       '/reply', json=json.dumps(EncodeReplyMsg(replyMsg)))
 
     # primary 收到request后转发给其他节点
-    def GetReq(self, reqMsg:RequestMsg):
+    def GetReq(self, reqMsg: RequestMsg):
         LogMsg(reqMsg)
         self.CreateStateForNewConsensus()
         if self.CurrentState is not None:
@@ -76,9 +76,9 @@ class Node:
                 self.Broadcast(EncodePrePrepareMsg(
                     prePrepareMsg), '/preprepare')
                 LogStage("Prepare", False)
-                preMsg = VoteMsg(self.CurrentState.ViewID, prePrepareMsg.SequenceID, prePrepareMsg.Digest, self.NodeID, MsgType.PREPAREMSG,True)
+                preMsg = VoteMsg(self.CurrentState.ViewID, prePrepareMsg.SequenceID,
+                                 prePrepareMsg.Digest, self.NodeID, MsgType.PREPAREMSG, True)
                 self.CurrentState.MsgLogs.PrepareMsgs[self.NodeID] = preMsg
-                
 
     # 节点收到preprepare消息后，开启自己的preprepare阶段，即转发给其他节点
     def GetPrePrepare(self, prePrepareMsg: PrePrepareMsg):
@@ -151,7 +151,15 @@ class Node:
     def GetReply(self, replyMsg: ReplyMsg):
         # print("GetReply", flush=True)
         # print("Result of {} by {} : {}".format(replyMsg.Result, replyMsg.NodeID, replyMsg.Result),flush=True)
-        if self.CurrentState is not None and self.CurrentState.MsgLogs.ReqMsg.Timestamp == replyMsg.Timestamp and self.NodeID != self.CurrentState.MsgLogs.ReqMsg.Operation.split(' ')[1]:
+        if self.CurrentState is not None and self.CurrentState.CurrentStage == stage.INVOLVINGCOMMITED:
+            self.CurrentState.MsgLogs.CommitMsgs[self.NodeID] = self.LastConsensusMsgs.CommitMsgs[self.NodeID]
+            invReqMsg = self.CurrentState.MsgLogs.ReqMsg
+            self.CurrentState.MsgLogs.ReqMsg = RequestMsg(
+                invReqMsg.Timestamp, 5, "InvolveRequest " + invReqMsg.NodeID + " " + str(invReqMsg.Port), 24, [[1, 2, 3], [1, 1, 1]])
+            self.getExecute("InvolveRequest " + invReqMsg.NodeID +
+                            " " + str(invReqMsg.Port), True)
+            self.CurrentState.MsgLogs.ReqMsg = invReqMsg
+        elif self.CurrentState is not None and self.CurrentState.MsgLogs.ReqMsg.Timestamp == replyMsg.Timestamp and self.NodeID != self.CurrentState.MsgLogs.ReqMsg.Operation.split(' ')[1]:
             reqPort = self.CurrentState.MsgLogs.ReqMsg.Operation.split(' ')[2]
             requests.post("http://127.0.0.1:" + reqPort + "/reply",
                           json=json.dumps(EncodeReplyMsg(replyMsg)))
@@ -162,13 +170,24 @@ class Node:
 
     def GetGlobalForward(self, globalForwardMsg: GlobalForwardMsg):
         LogMsg(globalForwardMsg.ReqMsg)
+        # print("{} {} {}".format(type(globalForwardMsg.ReqMsg),
+        #                         type(globalForwardMsg.CommitMsg), globalForwardMsg.CommitMsg.NodeID), flush=True)
         if self.CurrentState is not None and self.CurrentState.CurrentStage == stage.EXECUTED:
             return None
-        if self.CurrentState is not None and verifyForward(self.CurrentState, globalForwardMsg) == False:
+        if self.CurrentState is not None and verifyForward(globalForwardMsg) == False:
             return None
         LogMsg(globalForwardMsg)
         self.MsgBuffer.GlobalForwardMsgs.append(globalForwardMsg)
         localForwardMsg = LocalForwardMsg(globalForwardMsg)
+        if globalForwardMsg.ReqMsg.Operation.split(" ")[0] == "InvolveRequest":
+            if self.CurrentState is None:
+                self.CreateStateForNewConsensus()
+            if self.CurrentState is not None:
+                if self.CurrentState.CurrentStage != stage.INVOLVINGEXECUTED:
+                    self.CurrentState.CurrentStage = stage.INVOLVINGCOMMITED
+                self.CurrentState.MsgLogs.GlobalForwardMsgs[globalForwardMsg.CommitMsg.NodeID] = globalForwardMsg
+                # print("{} {} {}".format(type(self.CurrentState.MsgLogs.GlobalForwardMsgs[globalForwardMsg.CommitMsg.NodeID].ReqMsg),
+                #                         type(self.CurrentState.MsgLogs.GlobalForwardMsgs[globalForwardMsg.CommitMsg.NodeID].CommitMsg), self.CurrentState.MsgLogs.GlobalForwardMsgs[globalForwardMsg.CommitMsg.NodeID].CommitMsg.NodeID), flush=True)
         LogStage("Local Sharing", False)
         self.Broadcast(EncodeLocalForwardMsg(localForwardMsg), "/localforward")
         LogStage("Local Sharing", True)
@@ -176,15 +195,14 @@ class Node:
     def GetLocalForward(self, localForwardMsg: LocalForwardMsg):
         globalForwardMsg = localForwardMsg.LocalForwardMsg
 
-        # print("GetLocalForward : {}".format(getDigest(globalForwardMsg.ReqMsg)),flush=True)
+        # print("GetLocalForward : {}".format(
+        #     type(self.MsgBuffer.GlobalForwardMsgs[0].ReqMsg)), flush=True)
         if self.NodeID[-1] == '0':
-
             if self.CurrentState is None:
                 self.CreateStateForNewConsensus()
                 if self.CurrentState is not None:
                     self.CurrentState.MsgLogs.GlobalForwardMsgs[
                         globalForwardMsg.CommitMsg.NodeID] = globalForwardMsg
-
             elif self.CurrentState.CurrentStage == stage.COMMITED:
                 # 当收到全局转发的事务后，本地确认之后，如果本地阶段进行到了COMMITED阶段，那么说明已经收到了第一轮中欠缺的信息
                 print("[Execute Transaction Twice] {}".format(
@@ -223,13 +241,14 @@ class Node:
         if invReqMsg.Scheme == 0:
             self.NodeTable[invReqMsg.NodeID] = "127.0.0.1:" + \
                 str(invReqMsg.Port)
+            self.CurrentState
             if self.NodeID == self.View.Primary:
                 LogStage("InvolveForward", False)
                 self.Broadcast(EncodeInvolveRequestMsg(
                     invReqMsg), "/involveReq")
                 LogStage("InvolveForward", True)
-                msg = RequestMsg(invReqMsg.Timestamp, 5, "InvolveRequest r1_4 30004", 24, [
-                                 [int(self.NodeID[1])], [1]])
+                msg = RequestMsg(invReqMsg.Timestamp, 5, "InvolveRequest " + invReqMsg.NodeID + " " + str(invReqMsg.Port), 24, [
+                    [1, 2, 3], [1, 1, 1]])
                 requests.post(
                     "http://" + self.NodeTable[self.NodeID] + "/req", json=json.dumps(EncodeRequestMsg(msg)))
 
@@ -239,8 +258,8 @@ class Node:
                 self.Broadcast(EncodeInvolveRequestMsg(
                     invReqMsg), "/involveReq")
                 LogStage("InvolveForward", True)
-                msg = RequestMsg(invReqMsg.Timestamp, 5, "InvolveRequest r1_4 30004", 24, [
-                                 [int(self.NodeID[1])], [1]])
+                msg = RequestMsg(invReqMsg.Timestamp, 5, "InvolveRequest " + invReqMsg.NodeID + " " + str(invReqMsg.Port), 24, [
+                                 [1, 2, 3], [1, 1, 1]])
                 requests.post(
                     "http://" + self.NodeTable[self.NodeID] + "/req", json=json.dumps(EncodeRequestMsg(msg)))
 
@@ -269,14 +288,15 @@ class Node:
             # print(getDigest(LastReqMsg),flush=True)
             self.CurrentState.MsgLogs.InvReqMsgs.append(LastReqMsg)
             LogStage("Involve Pre-prepare", False)
-            prepareMsg = self.CurrentState.InvolveVerifyReq(self.NodeID, LastReqMsg)
+            prepareMsg = self.CurrentState.InvolveVerifyReq(
+                self.NodeID, LastReqMsg)
             if prepareMsg is not None:
                 self.CurrentState.MsgLogs.PrepareMsgs[self.NodeID] = prepareMsg
                 LogStage("Involve Pre-prepare", True)
                 self.Broadcast(EncodeVoteMsg(prepareMsg), "/hisInvolvePrepare")
                 LogStage("Involve Prepare", False)
-                print(self.CurrentState.CurrentStage,flush=True)
-        
+                print(self.CurrentState.CurrentStage, flush=True)
+
     def GetInvolvePrepare(self, prepareMsg: VoteMsg):
         if self.CurrentState is not None:
             # print(self.CurrentState.MsgLogs.ReqMsg.NodeID,flush=True)
@@ -287,11 +307,13 @@ class Node:
                 if self.CurrentState.InvolveVerifyPrepare(prepareMsg, self.CurrentState.MsgLogs.InvReqMsgs[0], self.CurrentState.MsgLogs.PrepareMsgs):
                     invReq = self.CurrentState.MsgLogs.ReqMsg
                     self.CurrentState.MsgLogs.ReqMsg = self.CurrentState.MsgLogs.InvReqMsgs[0]
-                    (commitMsg, preResult) = self.CurrentState.Prepare(self.NodeID, prepareMsg)
+                    (commitMsg, preResult) = self.CurrentState.Prepare(
+                        self.NodeID, prepareMsg)
                     self.CurrentState.MsgLogs.ReqMsg = invReq
                     self.CurrentState.CurrentStage = stage.INVOLVINGPREPARED
                     if preResult == False:
-                        print("[As prepare votes are FALSE, Invovle operation will not be executed]", flush=True)
+                        print(
+                            "[As prepare votes are FALSE, Invovle operation will not be executed]", flush=True)
                         self.RestartNode()
                     else:
                         if commitMsg is not None:
@@ -299,14 +321,16 @@ class Node:
                             # if self.NodeID[-1] == "3" or self.NodeID[-1] == "2" or self.NodeID[-1] == "1":
                             #     commitMsg.Vote = False
                             commitMsg.MsgType = MsgType.INVOLVECOMMITMSG
-                            print('InvolveVerifyPrepare if {} msg by {}\n'.format(self.CurrentState.CurrentStage,prepareMsg.NodeID),flush=True)
+                            print('InvolveVerifyPrepare if {} msg by {}\n'.format(
+                                self.CurrentState.CurrentStage, prepareMsg.NodeID), flush=True)
                             LogStage("Involve Prepare", True)
-                            self.Broadcast(EncodeVoteMsg(commitMsg), "/hisInvolveCommit")
+                            self.Broadcast(EncodeVoteMsg(
+                                commitMsg), "/hisInvolveCommit")
                             LogStage("Involve Commit", False)
                         else:
                             self.CurrentState.CurrentStage = stage.INVOLVINGPREPREPARED
             else:
-                if self.CurrentState.InvolveVerifyPrepare( prepareMsg, self.LastConsensusMsgs.ReqMsg, self.LastConsensusMsgs.PrepareMsgs):
+                if self.CurrentState.InvolveVerifyPrepare(prepareMsg, self.LastConsensusMsgs.ReqMsg, self.LastConsensusMsgs.PrepareMsgs):
                     # print('InvolveVerifyPrepare',flush=True)
                     lastPrepareMsg = self.LastConsensusMsgs.PrepareMsgs[self.NodeID]
                     lastPrepareMsg.MsgType = MsgType.INVOLVEPREPAREMSG
@@ -314,24 +338,28 @@ class Node:
                     # if self.NodeID[-1] == "3" or self.NodeID[-1] == "2":
                     #     # commitMsg.Vote = False
                     #     return
-                    requests.post("http://" + self.NodeTable[self.CurrentState.MsgLogs.ReqMsg.NodeID] + "/hisInvolvePrepare", json=json.dumps(EncodeVoteMsg(lastPrepareMsg)))
-                    print('[Send] ' + self.NodeTable[self.CurrentState.MsgLogs.ReqMsg.NodeID] + "/hisInvolvePrepare", flush=True)
+                    requests.post("http://" + self.NodeTable[self.CurrentState.MsgLogs.ReqMsg.NodeID] +
+                                  "/hisInvolvePrepare", json=json.dumps(EncodeVoteMsg(lastPrepareMsg)))
+                    print('[Send] ' + self.NodeTable[self.CurrentState.MsgLogs.ReqMsg.NodeID] +
+                          "/hisInvolvePrepare", flush=True)
                     self.CurrentState.CurrentStage = stage.INVOLVINGPREPARED
-                
-    
+
     def GetInvolveCommit(self, commitMsg: VoteMsg):
         if self.CurrentState is not None:
             if self.NodeID == self.CurrentState.MsgLogs.ReqMsg.NodeID:
-                print('InvolveVerifyCommit if {} msg by {}'.format(self.CurrentState.CurrentStage,commitMsg.NodeID),flush=True)
+                # print('InvolveVerifyCommit if {} msg by {}'.format(
+                #     self.CurrentState.CurrentStage, commitMsg.NodeID), flush=True)
                 if self.CurrentState.InvolveVerifyCommit(commitMsg, self.CurrentState.MsgLogs.InvReqMsgs[0], self.CurrentState.MsgLogs.CommitMsgs):
                     invReq = self.CurrentState.MsgLogs.ReqMsg
                     self.CurrentState.MsgLogs.ReqMsg = self.CurrentState.MsgLogs.InvReqMsgs[0]
                     # (commitMsg, preResult) = self.CurrentState.Prepare(self.NodeID, prepareMsg)
-                    (replyMsg, commitedMsg, globalForwardMsg,comResult) = self.CurrentState.Commit(self.NodeID, commitMsg)
+                    (replyMsg, commitedMsg, globalForwardMsg,
+                     comResult) = self.CurrentState.Commit(self.NodeID, commitMsg)
                     self.CurrentState.MsgLogs.ReqMsg = invReq
                     self.CurrentState.CurrentStage = stage.INVOLVINGCOMMITED
                     if comResult == False:
-                        print("[As prepare votes are FALSE, Invovle operation will not be executed]", flush=True)
+                        print(
+                            "[As prepare votes are FALSE, Invovle operation will not be executed]", flush=True)
                         self.RestartNode()
                     else:
                         if replyMsg is not None:
@@ -340,19 +368,49 @@ class Node:
                             #     commitMsg.Vote = False
                             LogStage("Involve Commit", True)
                             self.Broadcast(EncodeReplyMsg(replyMsg), "/reply")
-                            
+                            invReq = self.CurrentState.MsgLogs.ReqMsg
+                            self.CurrentState.MsgLogs.ReqMsg = RequestMsg(invReq.Timestamp, 5, "InvolveRequest r1_4 30004", 24, [
+                                [1, 2, 3], [1, 1, 1]])
+                            self.getExecute(
+                                "InvolveRequest " + invReq.NodeID + " " + str(invReq.Port), True)
+                            self.CurrentState.MsgLogs.ReqMsg = invReq
                             # LogStage("Involve Commit", False)
                         else:
                             self.CurrentState.CurrentStage = stage.INVOLVINGPREPARED
             else:
                 if self.CurrentState.InvolveVerifyCommit(commitMsg, self.LastConsensusMsgs.ReqMsg, self.LastConsensusMsgs.CommitMsgs):
-                    print('InvolveVerifyCommit',flush=True)
+                    # print('InvolveVerifyCommit', flush=True)
                     lastComMsg = self.LastConsensusMsgs.CommitMsgs[self.NodeID]
                     lastComMsg.MsgType = MsgType.INVOLVECOMMITMSG
-                    requests.post("http://" + self.NodeTable[self.CurrentState.MsgLogs.ReqMsg.NodeID] + "/hisInvolveCommit", json=json.dumps(EncodeVoteMsg(lastComMsg)))
-                    print('[Send] ' + self.NodeTable[self.CurrentState.MsgLogs.ReqMsg.NodeID] + "/hisInvolveCommit", flush=True)
+                    requests.post("http://" + self.NodeTable[self.CurrentState.MsgLogs.ReqMsg.NodeID] +
+                                  "/hisInvolveCommit", json=json.dumps(EncodeVoteMsg(lastComMsg)))
+                    print('[Send] ' + self.NodeTable[self.CurrentState.MsgLogs.ReqMsg.NodeID] +
+                          "/hisInvolveCommit", flush=True)
                     self.CurrentState.CurrentStage = stage.INVOLVINGCOMMITED
-        
+
+    def GetInvolveGlobalShare(self, localForwardMsg: LocalForwardMsg):
+        globalForwardMsg = localForwardMsg.LocalForwardMsg
+
+        # print("{} {}".format(type(self.CurrentState.MsgLogs.GlobalForwardMsgs[self.NodeID[0]+str(
+        #     (int(self.NodeID[1])-2) % 3 + 1)+self.NodeID[-2:]].ReqMsg), self.NodeID[0]+str(
+        #     (int(self.NodeID[1])-2) % 3 + 1)+self.NodeID[-2:]), flush=True)
+        if self.CurrentState is not None:
+            # print(len(self.CurrentState.MsgLogs.GlobalForwardMsgs), flush=True)
+            if len(self.CurrentState.MsgLogs.GlobalForwardMsgs) <= 2*f:
+                self.CurrentState.MsgLogs.GlobalForwardMsgs[globalForwardMsg.CommitMsg.NodeID] = globalForwardMsg
+            else:
+                if globalForwardMsg.ReqMsg.Operation.split(" ")[1] not in self.NodeTable.keys():
+                    # self.NodeTable[globalForwardMsg.ReqMsg.Operation.split(
+                    #     " ")[1]] = "127.0.0.1:" + globalForwardMsg.ReqMsg.Operation.split(" ")[2]
+                    # print("")
+                    msg = self.CurrentState.MsgLogs.GlobalForwardMsgs[self.NodeID[0]+str(
+                        (int(self.NodeID[1])-2) % 3 + 1)+self.NodeID[-2:]]
+                    msg.ReqMsg = DecodeRequestMsg(msg.ReqMsg)
+                    msg.CommitMsg = DecodeVoteMsg(msg.CommitMsg)
+                    msg.CommitMsg.NodeID = self.NodeID
+                    self.getExecute(globalForwardMsg.ReqMsg.Operation, True)
+                    self.GlobalShare(msg, "InvolveForward")
+                self.RestartNode()
 
     def DispatchMsg(self):
         while 1:
@@ -364,7 +422,7 @@ class Node:
         while 1:
             if len(self.MsgDelivery) != 0:
                 # print("Resolve {} {}".format(
-                    # type(self.MsgDelivery[0]), self.MsgDelivery[0]), flush=True)
+                #     type(self.MsgDelivery[0]), self.MsgDelivery[0]), flush=True)
                 msg = self.MsgDelivery.pop(0)
                 msgType = type(msg)
                 if msgType == RequestMsg:
@@ -383,11 +441,12 @@ class Node:
                     elif msg.MsgType == MsgType.COMMITMSG:
                         self.GetCommit(msg)
                     elif msg.MsgType == MsgType.INVOLVEPREPAREMSG and self.CurrentState is not None and self.CurrentState.CurrentStage == stage.INVOLVINGPREPREPARED:
-                    # elif msg.MsgType == MsgType.INVOLVEPREPAREMSG:
+                        # elif msg.MsgType == MsgType.INVOLVEPREPAREMSG:
                         # print("Resolve msg.MsgType == MsgType.INVOLVEPREPAREMSG {}".format(msg.NodeID),flush=True)
                         self.GetInvolvePrepare(msg)
                     elif msg.MsgType == MsgType.INVOLVECOMMITMSG and self.CurrentState is not None and self.CurrentState.CurrentStage == stage.INVOLVINGPREPARED:
-                        print("Resolve msg.MsgType == MsgType.INVOLVECOMMITMSG {}".format(self.CurrentState.CurrentStage),flush=True)
+                        # print("Resolve msg.MsgType == MsgType.INVOLVECOMMITMSG {}".format(
+                        # self.CurrentState.CurrentStage), flush=True)
                         self.GetInvolveCommit(msg)
                 elif msgType == ReplyMsg:
                     # print("Result: {} by {} on {}".format(
@@ -396,7 +455,10 @@ class Node:
                 elif msgType == GlobalForwardMsg:
                     self.GetGlobalForward(msg)
                 elif msgType == LocalForwardMsg:
-                    self.GetLocalForward(msg)
+                    if self.CurrentState is not None and self.CurrentState.CurrentStage == stage.INVOLVINGCOMMITED:
+                        self.GetInvolveGlobalShare(msg)
+                    else:
+                        self.GetLocalForward(msg)
 
     def RouteMsg(self, msg):
         if msg is not None:
@@ -454,16 +516,19 @@ class Node:
                         self.MsgBuffer.CommitMsgs.append(msg)
                         self.MsgDelivery.extend(self.MsgBuffer.CommitMsgs)
                         self.MsgBuffer.CommitMsgs = []
-                        print("msg.MsgType == MsgType.INVOLVECOMMITMSG else",flush=True)
+                        # print(
+                        #     "msg.MsgType == MsgType.INVOLVECOMMITMSG else", flush=True)
             elif msgType == ReplyMsg:
-                # print("Result: {} by {} on {}".format(msg.Result, msg.NodeID, msg.Timestamp),flush=True)
-                if (self.CurrentState is None) or self.CurrentState.CurrentStage == stage.COMMITED or self.CurrentState == stage.INVOLVINGCOMMITED:
-                    # print("if {}".format(len(self.MsgBuffer.ReplyMsgs)),flush = True)
+                # print("Result: {} by {} on {}".format(
+                #     msg.Result, msg.NodeID, msg.Timestamp), flush=True)
+                if (self.CurrentState is None) or self.CurrentState.CurrentStage == stage.COMMITED or self.CurrentState.CurrentStage == stage.INVOLVINGCOMMITED:
+                    # print("if {}".format(len(self.MsgBuffer.ReplyMsgs)), flush=True)
                     self.MsgBuffer.ReplyMsgs.append(msg)
                     self.MsgDelivery.extend(self.MsgBuffer.ReplyMsgs)
                     self.MsgBuffer.ReplyMsgs = []
                 else:
-                    # print("else {}".format(len(self.MsgBuffer.ReplyMsgs)),flush = True)
+                    # print("else {}".format(
+                    #     len(self.MsgBuffer.ReplyMsgs)), flush=True)
                     self.MsgBuffer.ReplyMsgs.append(msg)
                 # for i in self.MsgDelivery:
                 #     print("After {}".format(i),flush=True)
@@ -471,7 +536,12 @@ class Node:
                 if self.CurrentState is None or self.CurrentState.CurrentStage == stage.COMMITED:
                     self.MsgDelivery.append(msg)
             elif msgType == LocalForwardMsg:
-                self.MsgDelivery.append(msg)
+                if self.CurrentState is None:
+                    self.MsgBuffer.LocalForwardMsgs.append(msg)
+                else:
+                    self.MsgBuffer.LocalForwardMsgs.append(msg)
+                    self.MsgDelivery.extend(self.MsgBuffer.LocalForwardMsgs)
+                    self.MsgBuffer.LocalForwardMsgs = []
 
     # 片内广播
     def Broadcast(self, msg, route):
@@ -485,51 +555,62 @@ class Node:
 
     # 片间通信
     def GlobalShare(self, globalForwardMsg: GlobalForwardMsg, sourceStage):
-
-        tRingOrder = globalForwardMsg.ReqMsg.RingOrder[0]
-        nodeIndex = tRingOrder.index(int(self.NodeID[1]))
-        tRingFrequency = globalForwardMsg.ReqMsg.RingOrder[1]
-
-        if sourceStage == "GetCommit" and self.CurrentState is not None:
-            msg = EncodeGlobalForwardMsg(globalForwardMsg)
-            if tRingFrequency[nodeIndex] == 1:
-                self.CurrentState.CurrentStage = stage.EXECUTED
-            if tRingFrequency.count(2) == 0:
-                if nodeIndex == len(tRingOrder) - 1:
-                    print("This Transaction Executed Completely. \n{} : {}".format(TimestampToDate(
-                        self.CurrentState.MsgLogs.ReqMsg.Timestamp), self.CurrentState.MsgLogs.ReqMsg.Operation), flush=True)
-                    self.RestartNode()
-                else:
-                    print('[Send] ' + self.NodeTable[self.NodeID[0] + str(tRingOrder[(nodeIndex+1) % len(
-                        tRingOrder)]) + self.NodeID[-2:]] + '/globalforward', flush=True)
-                    requests.post("http://" + self.NodeTable[self.NodeID[0] + str(tRingOrder[(nodeIndex+1) % len(
-                        tRingOrder)]) + self.NodeID[-2:]] + '/globalforward', json=json.dumps(msg))
-            else:
-                if nodeIndex != len(tRingOrder) - 1:
-                    print('[Send] ' + self.NodeTable[self.NodeID[0] + str(tRingOrder[(nodeIndex+1) % len(
-                        tRingOrder)]) + self.NodeID[-2:]] + '/globalforward', flush=True)
-                    requests.post("http://" + self.NodeTable[self.NodeID[0] + str(tRingOrder[(nodeIndex+1) % len(
-                        tRingOrder)]) + self.NodeID[-2:]] + '/globalforward', json=json.dumps(msg))
-                else:
-                    print('[Send] ' + self.NodeTable[self.NodeID[0] + str(tRingOrder[nextShard(
-                        nodeIndex, tRingFrequency, "GetCommit")]) + self.NodeID[-2:]] + '/globalforward', flush=True)
-                    requests.post("http://" + self.NodeTable[self.NodeID[0] + str(tRingOrder[nextShard(
-                        nodeIndex, tRingFrequency, "GetCommit")]) + self.NodeID[-2:]] + '/globalforward', json=json.dumps(msg))
-        elif sourceStage == "GetLocalForward" and self.CurrentState is not None:
-            nextShardIndex = nextShard(
-                nodeIndex, tRingFrequency, "GetLocalForward")
-
-            # print("sourceStage == GetLocalForward {} {} {} {}".format(nextShardIndex,tRingOrder,nodeIndex,tRingFrequency),flush=True)
-
-            if nextShardIndex < nodeIndex:
-                print("This Transaction Executed Completely. {} : {}".format(TimestampToDate(
-                    self.CurrentState.MsgLogs.ReqMsg.Timestamp), self.CurrentState.MsgLogs.ReqMsg.Operation), flush=True)
-            else:
-                msg = EncodeGlobalForwardMsg(globalForwardMsg)
-                print('[Send] ' + self.NodeTable[self.NodeID[0] + str(
-                    tRingOrder[nextShardIndex]) + self.NodeID[-2:]] + '/globalforward', flush=True)
+        if sourceStage == "InvolveForward" and self.CurrentState is not None:
+            try:
+                print("{} {}".format(type(globalForwardMsg.ReqMsg),
+                                     type(globalForwardMsg.CommitMsg)), flush=True)
                 requests.post("http://" + self.NodeTable[self.NodeID[0] + str(
-                    tRingOrder[nextShardIndex]) + self.NodeID[-2:]] + '/globalforward', json=json.dumps(msg))
+                    int(self.NodeID[1]) % 3 + 1) + self.NodeID[-2:]] + '/globalforward', json=json.dumps(EncodeGlobalForwardMsg(globalForwardMsg)))
+                print('[Send] ' + self.NodeTable[self.NodeID[0] + str(
+                    int(self.NodeID[1]) % 3 + 1) + self.NodeID[-2:]] + '/globalforward', flush=True)
+            except Exception as e:
+                print('[Send Failed] {} as {}'.format(
+                    self.NodeID[0] + str(int(self.NodeID[1]) % 3 + 1) + self.NodeID[-2:], e), flush=True)
+            # pass
+        else:
+            tRingOrder = globalForwardMsg.ReqMsg.RingOrder[0]
+            nodeIndex = tRingOrder.index(int(self.NodeID[1]))
+            tRingFrequency = globalForwardMsg.ReqMsg.RingOrder[1]
+            if sourceStage == "GetCommit" and self.CurrentState is not None:
+                msg = EncodeGlobalForwardMsg(globalForwardMsg)
+                if tRingFrequency[nodeIndex] == 1:
+                    self.CurrentState.CurrentStage = stage.EXECUTED
+                if tRingFrequency.count(2) == 0:
+                    if nodeIndex == len(tRingOrder) - 1:
+                        print("This Transaction Executed Completely. \n{} : {}".format(TimestampToDate(
+                            self.CurrentState.MsgLogs.ReqMsg.Timestamp), self.CurrentState.MsgLogs.ReqMsg.Operation), flush=True)
+                        self.RestartNode()
+                    else:
+                        print('[Send] ' + self.NodeTable[self.NodeID[0] + str(tRingOrder[(nodeIndex+1) % len(
+                            tRingOrder)]) + self.NodeID[-2:]] + '/globalforward', flush=True)
+                        requests.post("http://" + self.NodeTable[self.NodeID[0] + str(tRingOrder[(nodeIndex+1) % len(
+                            tRingOrder)]) + self.NodeID[-2:]] + '/globalforward', json=json.dumps(msg))
+                else:
+                    if nodeIndex != len(tRingOrder) - 1:
+                        print('[Send] ' + self.NodeTable[self.NodeID[0] + str(tRingOrder[(nodeIndex+1) % len(
+                            tRingOrder)]) + self.NodeID[-2:]] + '/globalforward', flush=True)
+                        requests.post("http://" + self.NodeTable[self.NodeID[0] + str(tRingOrder[(nodeIndex+1) % len(
+                            tRingOrder)]) + self.NodeID[-2:]] + '/globalforward', json=json.dumps(msg))
+                    else:
+                        print('[Send] ' + self.NodeTable[self.NodeID[0] + str(tRingOrder[nextShard(
+                            nodeIndex, tRingFrequency, "GetCommit")]) + self.NodeID[-2:]] + '/globalforward', flush=True)
+                        requests.post("http://" + self.NodeTable[self.NodeID[0] + str(tRingOrder[nextShard(
+                            nodeIndex, tRingFrequency, "GetCommit")]) + self.NodeID[-2:]] + '/globalforward', json=json.dumps(msg))
+            elif sourceStage == "GetLocalForward" and self.CurrentState is not None:
+                nextShardIndex = nextShard(
+                    nodeIndex, tRingFrequency, "GetLocalForward")
+
+                # print("sourceStage == GetLocalForward {} {} {} {}".format(nextShardIndex,tRingOrder,nodeIndex,tRingFrequency),flush=True)
+
+                if nextShardIndex < nodeIndex:
+                    print("This Transaction Executed Completely. {} : {}".format(TimestampToDate(
+                        self.CurrentState.MsgLogs.ReqMsg.Timestamp), self.CurrentState.MsgLogs.ReqMsg.Operation), flush=True)
+                else:
+                    msg = EncodeGlobalForwardMsg(globalForwardMsg)
+                    print('[Send] ' + self.NodeTable[self.NodeID[0] + str(
+                        tRingOrder[nextShardIndex]) + self.NodeID[-2:]] + '/globalforward', flush=True)
+                    requests.post("http://" + self.NodeTable[self.NodeID[0] + str(
+                        tRingOrder[nextShardIndex]) + self.NodeID[-2:]] + '/globalforward', json=json.dumps(msg))
 
     def RestartNode(self):
         if self.CurrentState is not None:
@@ -552,11 +633,14 @@ class Node:
                 if operations[1] not in self.NodeTable:
                     self.NodeTable[operations[1]
                                    ] = "127.0.0.1:" + operations[2]
+                if self.CurrentState is not None and type(self.CurrentState.MsgLogs.ReqMsg) == RequestMsg:
+                    msg = GlobalForwardMsg(self.CurrentState.MsgLogs.ReqMsg, self.CurrentState.MsgLogs.CommitMsgs[self.NodeID], getDigest(
+                        self.CurrentState.MsgLogs.CommitMsgs[self.NodeID]))
+                    self.GlobalShare(msg, "InvolveForward")
+
         for node in self.NodeTable.keys():
             print("NodeTable : {} {}".format(
                 node, self.NodeTable[node]), flush=True)
-
-
 
 
 def nextShard(nodeIndex, tRingFrequency: list, sStage):
