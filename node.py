@@ -436,9 +436,9 @@ class Node:
                 elif msgType == PrePrepareMsg:
                     self.GetPrePrepare(msg)
                 elif msgType == VoteMsg:
-                    if msg.MsgType == MsgType.PREPAREMSG:
+                    if msg.MsgType == MsgType.PREPAREMSG and self.CurrentState is not None and self.CurrentState.CurrentStage == stage.PREPREPARED:
                         self.GetPrepare(msg)
-                    elif msg.MsgType == MsgType.COMMITMSG:
+                    elif msg.MsgType == MsgType.COMMITMSG and self.CurrentState is not None and self.CurrentState.CurrentStage == stage.PREPARED:
                         self.GetCommit(msg)
                     elif msg.MsgType == MsgType.INVOLVEPREPAREMSG and self.CurrentState is not None and self.CurrentState.CurrentStage == stage.INVOLVINGPREPREPARED:
                         # elif msg.MsgType == MsgType.INVOLVEPREPAREMSG:
