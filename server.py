@@ -20,7 +20,6 @@ myNode = NewNode('', {"r1_0": "127.0.0.1:30000",
                       "r3_3": "127.0.0.1:30023"},
                  View(100, "r1_0"), None, [], MsgBuffer([], [], [], [], [], [], []), [], [])
 myServer = Server(1, myNode)
-
 app = Flask(__name__)
 
 

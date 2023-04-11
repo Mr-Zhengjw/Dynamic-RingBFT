@@ -149,8 +149,9 @@ class Node:
                     LogStage("Global Sharing", True)
 
     def GetReply(self, replyMsg: ReplyMsg):
-        # print("GetReply", flush=True)
-        # print("Result of {} by {} : {}".format(replyMsg.Result, replyMsg.NodeID, replyMsg.Result),flush=True)
+        print("GetReply", flush=True)
+        # print("Result of {} by {} : {} {} {}".format(replyMsg.Result,
+        #       replyMsg.NodeID, replyMsg.Result, type(self.CurrentState.MsgLogs.ReqMsg), self.CurrentState.MsgLogs.ReqMsg.NodeID), flush=True)
         if self.CurrentState is not None and self.CurrentState.CurrentStage == stage.INVOLVINGCOMMITED:
             self.CurrentState.MsgLogs.CommitMsgs[self.NodeID] = self.LastConsensusMsgs.CommitMsgs[self.NodeID]
             invReqMsg = self.CurrentState.MsgLogs.ReqMsg
@@ -163,10 +164,24 @@ class Node:
             reqPort = self.CurrentState.MsgLogs.ReqMsg.Operation.split(' ')[2]
             requests.post("http://127.0.0.1:" + reqPort + "/reply",
                           json=json.dumps(EncodeReplyMsg(replyMsg)))
+            print('[Send] ' + reqPort + "/reply", flush=True)
         elif self.LastConsensusMsgs.ReqMsg is not None and self.LastConsensusMsgs.ReqMsg.Timestamp == replyMsg.Timestamp and self.LastConsensusMsgs.ReqMsg.Operation.split(' ')[0] == "InvolveRequest" and self.NodeID != self.LastConsensusMsgs.ReqMsg.Operation.split(' ')[1]:
             reqPort = self.LastConsensusMsgs.ReqMsg.Operation.split(' ')[2]
             requests.post("http://127.0.0.1:" + reqPort + "/reply",
                           json=json.dumps(EncodeReplyMsg(replyMsg)))
+            print('[Send] '+reqPort + "/reply", flush=True)
+        elif self.CurrentState is not None and len(self.CurrentState.MsgLogs.InvReqMsgs) != 0 and self.CurrentState.MsgLogs.InvReqMsgs[0].NodeID == self.NodeID:
+            if len(self.CommittedMsgs) < 2*f:
+                self.CommittedMsgs.append(replyMsg)
+            else:
+                self.getExecute(
+                    self.CurrentState.MsgLogs.ReqMsg.Operation, True)
+                self.RestartNode()
+                # requests.post("http://127.0.0.1:" + self.NodeTable[self.NodeID[0] + str(
+                #     int(self.NodeID[1]) % 3 + 1) + self.NodeID[-2:]] + "/reply",
+                #     json=json.dumps(EncodeReplyMsg(replyMsg)))
+                # print('[Send] ' + self.NodeTable[self.NodeID[0] + str(
+                #     int(self.NodeID[1]) % 3 + 1) + self.NodeID[-2:]] + "/reply", flush=True)
 
     def GetGlobalForward(self, globalForwardMsg: GlobalForwardMsg):
         LogMsg(globalForwardMsg.ReqMsg)
@@ -194,10 +209,11 @@ class Node:
 
     def GetLocalForward(self, localForwardMsg: LocalForwardMsg):
         globalForwardMsg = localForwardMsg.LocalForwardMsg
-
         # print("GetLocalForward : {}".format(
         #     type(self.MsgBuffer.GlobalForwardMsgs[0].ReqMsg)), flush=True)
-        if self.NodeID[-1] == '0':
+        if globalForwardMsg.ReqMsg.Operation.split(" ")[0] == "InvolveRequest":
+            self.GetInvolveGlobalShare(localForwardMsg)
+        elif self.NodeID[-1] == '0':
             if self.CurrentState is None:
                 self.CreateStateForNewConsensus()
                 if self.CurrentState is not None:
@@ -262,6 +278,17 @@ class Node:
                                  [1, 2, 3], [1, 1, 1]])
                 requests.post(
                     "http://" + self.NodeTable[self.NodeID] + "/req", json=json.dumps(EncodeRequestMsg(msg)))
+            elif self.NodeID == invReqMsg.NodeID:
+                self.CreateStateForNewConsensus()
+                if self.CurrentState is not None:
+                    self.CurrentState.MsgLogs.InvReqMsgs.append(invReqMsg)
+                    self.CurrentState.MsgLogs.ReqMsg = RequestMsg(invReqMsg.Timestamp, 5, "InvolveRequest " + invReqMsg.NodeID + " " + str(invReqMsg.Port), 24, [
+                        [1, 2, 3], [1, 1, 1]])
+                    self.CurrentState.CurrentStage = stage.EXECUTED
+                requests.post(
+                    "http://" + self.NodeTable[self.View.Primary] + "/involveReq", json=json.dumps(EncodeInvolveRequestMsg(invReqMsg)))
+                print('[Send] ' + self.NodeTable[self.View.Primary] +
+                      "/involveReq", flush=True)
 
         elif invReqMsg.Scheme == 2:
             self.CreateStateForNewConsensus()
@@ -390,12 +417,12 @@ class Node:
 
     def GetInvolveGlobalShare(self, localForwardMsg: LocalForwardMsg):
         globalForwardMsg = localForwardMsg.LocalForwardMsg
-
+        print("GetInvolveGlobalShare", flush=True)
         # print("{} {}".format(type(self.CurrentState.MsgLogs.GlobalForwardMsgs[self.NodeID[0]+str(
         #     (int(self.NodeID[1])-2) % 3 + 1)+self.NodeID[-2:]].ReqMsg), self.NodeID[0]+str(
         #     (int(self.NodeID[1])-2) % 3 + 1)+self.NodeID[-2:]), flush=True)
         if self.CurrentState is not None:
-            # print(len(self.CurrentState.MsgLogs.GlobalForwardMsgs), flush=True)
+            print(len(self.CurrentState.MsgLogs.GlobalForwardMsgs), flush=True)
             if len(self.CurrentState.MsgLogs.GlobalForwardMsgs) <= 2*f:
                 self.CurrentState.MsgLogs.GlobalForwardMsgs[globalForwardMsg.CommitMsg.NodeID] = globalForwardMsg
             else:
@@ -403,14 +430,22 @@ class Node:
                     # self.NodeTable[globalForwardMsg.ReqMsg.Operation.split(
                     #     " ")[1]] = "127.0.0.1:" + globalForwardMsg.ReqMsg.Operation.split(" ")[2]
                     # print("")
-                    msg = self.CurrentState.MsgLogs.GlobalForwardMsgs[self.NodeID[0]+str(
-                        (int(self.NodeID[1])-2) % 3 + 1)+self.NodeID[-2:]]
-                    msg.ReqMsg = DecodeRequestMsg(msg.ReqMsg)
-                    msg.CommitMsg = DecodeVoteMsg(msg.CommitMsg)
-                    msg.CommitMsg.NodeID = self.NodeID
+                    try:
+                        msg = self.CurrentState.MsgLogs.GlobalForwardMsgs[self.NodeID[0]+str(
+                            (int(self.NodeID[1])-2) % 3 + 1)+self.NodeID[-2:]]
+                        msg.ReqMsg = DecodeRequestMsg(msg.ReqMsg)
+                        msg.CommitMsg = DecodeVoteMsg(msg.CommitMsg)
+                        msg.CommitMsg.NodeID = self.NodeID
+                        self.GlobalShare(msg, "InvolveForward")
+                    except:
+                        pass
                     self.getExecute(globalForwardMsg.ReqMsg.Operation, True)
-                    self.GlobalShare(msg, "InvolveForward")
                 self.RestartNode()
+        else:
+            self.CreateStateForNewConsensus()
+            if self.CurrentState is not None:
+                self.CurrentState.MsgLogs.GlobalForwardMsgs[
+                    globalForwardMsg.CommitMsg.NodeID] = globalForwardMsg
 
     def DispatchMsg(self):
         while 1:
@@ -521,14 +556,14 @@ class Node:
             elif msgType == ReplyMsg:
                 # print("Result: {} by {} on {}".format(
                 #     msg.Result, msg.NodeID, msg.Timestamp), flush=True)
-                if (self.CurrentState is None) or self.CurrentState.CurrentStage == stage.COMMITED or self.CurrentState.CurrentStage == stage.INVOLVINGCOMMITED:
+                if (self.CurrentState is None) or self.CurrentState.CurrentStage == stage.COMMITED or self.CurrentState.CurrentStage == stage.EXECUTED or self.CurrentState.CurrentStage == stage.INVOLVINGCOMMITED:
                     # print("if {}".format(len(self.MsgBuffer.ReplyMsgs)), flush=True)
                     self.MsgBuffer.ReplyMsgs.append(msg)
                     self.MsgDelivery.extend(self.MsgBuffer.ReplyMsgs)
                     self.MsgBuffer.ReplyMsgs = []
                 else:
-                    # print("else {}".format(
-                    #     len(self.MsgBuffer.ReplyMsgs)), flush=True)
+                    # print("else {} {}".format(
+                    #     len(self.MsgBuffer.ReplyMsgs), self.CurrentState.CurrentStage), flush=True)
                     self.MsgBuffer.ReplyMsgs.append(msg)
                 # for i in self.MsgDelivery:
                 #     print("After {}".format(i),flush=True)
@@ -536,12 +571,13 @@ class Node:
                 if self.CurrentState is None or self.CurrentState.CurrentStage == stage.COMMITED:
                     self.MsgDelivery.append(msg)
             elif msgType == LocalForwardMsg:
-                if self.CurrentState is None:
-                    self.MsgBuffer.LocalForwardMsgs.append(msg)
-                else:
-                    self.MsgBuffer.LocalForwardMsgs.append(msg)
-                    self.MsgDelivery.extend(self.MsgBuffer.LocalForwardMsgs)
-                    self.MsgBuffer.LocalForwardMsgs = []
+                self.MsgDelivery.append(msg)
+                # if self.CurrentState is None:
+                #     self.MsgBuffer.LocalForwardMsgs.append(msg)
+                # else:
+                #     self.MsgBuffer.LocalForwardMsgs.append(msg)
+                #     self.MsgDelivery.extend(self.MsgBuffer.LocalForwardMsgs)
+                #     self.MsgBuffer.LocalForwardMsgs = []
 
     # 片内广播
     def Broadcast(self, msg, route):
@@ -549,9 +585,14 @@ class Node:
         if msg is not None:
             for key in self.NodeTable.keys():
                 if key != self.NodeID and key[1] == self.NodeID[1]:
-                    requests.post(
-                        "http://" + self.NodeTable[key] + route, json=json.dumps(msg))
-                    print('[Send] ' + self.NodeTable[key] + route, flush=True)
+                    try:
+                        requests.post(
+                            "http://" + self.NodeTable[key] + route, json=json.dumps(msg))
+                        print('[Send] ' + self.NodeTable[key] +
+                              route, flush=True)
+                    except:
+                        print('[Send Failed] ' +
+                              self.NodeTable[key] + route, flush=True)
 
     # 片间通信
     def GlobalShare(self, globalForwardMsg: GlobalForwardMsg, sourceStage):
@@ -634,9 +675,12 @@ class Node:
                     self.NodeTable[operations[1]
                                    ] = "127.0.0.1:" + operations[2]
                 if self.CurrentState is not None and type(self.CurrentState.MsgLogs.ReqMsg) == RequestMsg:
-                    msg = GlobalForwardMsg(self.CurrentState.MsgLogs.ReqMsg, self.CurrentState.MsgLogs.CommitMsgs[self.NodeID], getDigest(
-                        self.CurrentState.MsgLogs.CommitMsgs[self.NodeID]))
-                    self.GlobalShare(msg, "InvolveForward")
+                    try:
+                        msg = GlobalForwardMsg(self.CurrentState.MsgLogs.ReqMsg, self.CurrentState.MsgLogs.CommitMsgs[self.NodeID], getDigest(
+                            self.CurrentState.MsgLogs.CommitMsgs[self.NodeID]))
+                        self.GlobalShare(msg, "InvolveForward")
+                    except:
+                        print("[GlobalShare Failed]", flush=True)
 
         for node in self.NodeTable.keys():
             print("NodeTable : {} {}".format(
