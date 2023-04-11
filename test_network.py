@@ -22,17 +22,17 @@ if __name__ == '__main__':
     # res1 = requests.post("http://127.0.0.1:30000/req", json=reqMsgJson)
     # print("req respon为:{}".format(res1.text))
 
-    # reqMsg = RequestMsg(GetTimestamp(), 2, "getMyName 30004 ", 23, [[1], [1]])
-    # reqMsgJson = json.dumps(reqMsg.__dict__)
-    # res1 = requests.post("http://127.0.0.1:30000/req", json=reqMsgJson)
-    # print("req respon为:{}".format(res1.text))
+    reqMsg = RequestMsg(GetTimestamp(), 2, "getMyName 30004 ", 23, [[1], [1]])
+    reqMsgJson = json.dumps(reqMsg.__dict__)
+    res1 = requests.post("http://127.0.0.1:30000/req", json=reqMsgJson)
+    print("req respon为:{}".format(res1.text))
 
-    # time.sleep(10)
-    # invReqMsg = InvolveRequestMsg(GetTimestamp(), "r1_4", 30004, 2)
-    # invReqMsgJson = json.dumps(invReqMsg.__dict__)
-    # res2 = requests.post(
-    #     "http://127.0.0.1:30004/involveReq", json=invReqMsgJson)
-    # print("invIeq respon为:{}".format(res2.text))
+    time.sleep(10)
+    invReqMsg = InvolveRequestMsg(GetTimestamp(), "r1_4", 30004, 2)
+    invReqMsgJson = json.dumps(invReqMsg.__dict__)
+    res2 = requests.post(
+        "http://127.0.0.1:30004/involveReq", json=invReqMsgJson)
+    print("invIeq respon为:{}".format(res2.text))
 
     # preprepare
     # prePreMsg = PrePrepareMsg(1, 2, getDigest(reqMsg), reqMsgJson)
@@ -53,11 +53,11 @@ if __name__ == '__main__':
 
     # StartServer(30000)
 
-    invReqMsg = InvolveRequestMsg(GetTimestamp(), "r1_4", 30004, 0)
-    invReqMsgJson = json.dumps(invReqMsg.__dict__)
-    res2 = requests.post(
-        "http://127.0.0.1:30000/involveReq", json=invReqMsgJson)
-    print("invIeq respon为:{}".format(res2.text))
+    # invReqMsg = InvolveRequestMsg(GetTimestamp(), "r1_4", 30004, 0)
+    # invReqMsgJson = json.dumps(invReqMsg.__dict__)
+    # res2 = requests.post(
+    #     "http://127.0.0.1:30000/involveReq", json=invReqMsgJson)
+    # print("invIeq respon为:{}".format(res2.text))
 
     # invReqMsg = InvolveRequestMsg(GetTimestamp(), "r1_4", 30004, 1)
     # invReqMsgJson = json.dumps(invReqMsg.__dict__)

@@ -120,6 +120,8 @@ class State:
                 self.CurrentStage = stage.COMMITED
                 # 获取commit摘要
                 dig = getDigest(commitMsg)
+                if self.MsgLogs.ReqMsg.Operation.split(" ")[0] == "InvolveRequest":
+                    return (ReplyMsg(self.ViewID, self.MsgLogs.ReqMsg.Timestamp, self.MsgLogs.ReqMsg.ClientID, nodeID, result)), self.MsgLogs.ReqMsg, None, False
                 return (ReplyMsg(self.ViewID, self.MsgLogs.ReqMsg.Timestamp, self.MsgLogs.ReqMsg.ClientID, nodeID, result)), self.MsgLogs.ReqMsg, GlobalForwardMsg(self.MsgLogs.ReqMsg, commitMsg, dig), False
             else:
                 result = True
@@ -127,6 +129,8 @@ class State:
                 # 获取commit摘要
                 dig = getDigest(commitMsg)
                 # 返回回复客户端的消息，请求消息以及全局转发的信息
+                if self.MsgLogs.ReqMsg.Operation.split(" ")[0] == "InvolveRequest":
+                    return ReplyMsg(self.ViewID, self.MsgLogs.ReqMsg.Timestamp, self.MsgLogs.ReqMsg.ClientID, nodeID, result), self.MsgLogs.ReqMsg, None, True
                 return ReplyMsg(self.ViewID, self.MsgLogs.ReqMsg.Timestamp, self.MsgLogs.ReqMsg.ClientID, nodeID, result), self.MsgLogs.ReqMsg, GlobalForwardMsg(self.MsgLogs.ReqMsg, commitMsg, dig), True
         return None,None,None, True
 
